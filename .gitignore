@@ -10,3 +10,8 @@
 
 # macOS
 .DS_Store
+
+# build
+node_modules/
+dist/
+coverage/
