@@ -46,3 +46,6 @@ yarn-error.log*
 **/*.log
 package-lock.json
 **/*.bun
+
+# react email preview
+.react-email
