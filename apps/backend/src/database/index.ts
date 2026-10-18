@@ -15,6 +15,10 @@ pool.on('error', (error) => {
   logger.error({ err: error }, 'database idle client error')
 })
 
+pool.on('connect', () => {
+  logger.info('database connected')
+})
+
 export const db = drizzle({
   client: pool,
   logger: env.ENVIRONMENT === 'development' && {
