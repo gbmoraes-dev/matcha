@@ -1,5 +1,6 @@
 import { Elysia } from 'elysia'
 import { z } from 'zod'
+import { error } from '@/http/plugins/error'
 
 const schema = z.object({
   status: z.enum(['available', 'unavailable']),
@@ -21,9 +22,7 @@ export const liveness = new Elysia().get(
     },
     response: {
       200: schema,
-      500: z.object({
-        message: z.string(),
-      }),
+      500: error,
     },
   },
 )

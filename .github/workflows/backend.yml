@@ -36,6 +36,11 @@ jobs:
             backend:
               - 'apps/backend/**'
               - '.github/workflows/backend.yml'
+              # Shared root files that change what the backend runs or compiles.
+              # Add here any other root file with that effect.
+              - 'bun.lock'
+              - 'package.json'
+              - 'tsconfig.base.json'
 
   lint:
     name: lint
@@ -83,12 +88,25 @@ jobs:
     defaults:
       run:
         working-directory: apps/backend
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       ENVIRONMENT: test
       LOG_LEVEL: silent
       ORIGIN: http://localhost:3333
-      DATABASE_URL: postgres://localhost:5432/test
+      DATABASE_URL: postgres://postgres@localhost:5432/postgres
       CACHE_URL: redis://localhost:6379
+      BROKER_URL: amqp://localhost:5672
       BUCKET_URL: http://localhost:9000
       BUCKET_NAME: test
       BUCKET_ACCESS_KEY: test
@@ -113,7 +131,9 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      - run: bun test
+      - run: bun db:migrate
+
+      - run: bun run test
 
   build:
     name: build
