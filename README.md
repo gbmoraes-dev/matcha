@@ -29,6 +29,7 @@ cp .env.example .env                              # fill in the infra values
 cp apps/backend/.env.example apps/backend/.env    # fill in the backend values
 make all                                          # starts the infra and waits until it is healthy
 bun run backend:dev                               # starts the backend; GET http://localhost:3333/healthz
+bun run backend:dev:worker                        # starts the worker (queue consumers), in another terminal
 ```
 
 ## Local infrastructure
@@ -86,7 +87,23 @@ An empty value is not the same as an unset one: remove the lines you don't want 
 ### Health checks
 
 - `GET /healthz` (liveness) returns `200` with `{ "status": "available", "uptime": <seconds> }`. It never touches a dependency, so it stays `200` while Postgres is down.
-- `GET /readyz` (readiness) checks the dependencies (today, the database with a `SELECT 1`) and returns `200` with `{ "application": "available", "database": "available" }`, or `503` with the failing one marked `unavailable`. Each ticket that adds a dependency adds its own check in `src/http/routes/public/readiness.ts`.
+- `GET /readyz` (readiness) checks the database (`SELECT 1`), the cache (`redis.ping()`), the bucket (`s3.list`, which also validates the credentials) and the broker connection. It returns `200` with `{ "application", "database", "cache", "bucket", "broker" }`, all `available`, or `503` with the failing ones marked `unavailable`. Each check is cut after `CONNECTION_TIMEOUT_MS`. A new dependency adds its own check in `src/http/routes/public/readiness.ts`.
+
+## Cache, storage and broker
+
+- **Redis** (`src/cache/index.ts`) and **S3** (`src/storage/index.ts`) use Bun's native `RedisClient` and `S3Client`, with no wrapper: features import `redis` and `s3` and call them directly. The Redis client keeps reconnecting if Redis is down at boot or restarts. Pointing `BUCKET_URL` and the keys at another S3 provider is enough to switch from RustFS.
+- **RabbitMQ** (`src/broker/broker.ts`) uses [`rabbitmq-client`](https://github.com/cody-greene/node-rabbitmq-client), which reconnects on its own and sets consumers and publishers up again. Each queue gets a file in `src/broker/channels/` that declares the queue, `<queue>.retry` (a TTL that returns the message to the queue) and `<queue>.dlq`, and a dispatch function in `src/broker/messages/`. The API only publishes.
+
+## Worker
+
+`src/worker/subscriber.ts` is a separate process from the same codebase that runs the queue consumers (the first one arrives with the email queue). The API serves requests without it.
+
+Delivery is at-least-once: a message that was in flight when the worker stopped, for any reason, is delivered again, so consumers must be idempotent. When a message fails, the consumer counts the attempts in the `x-attempts` header and republishes it to `<queue>.retry` or, at the limit, to `<queue>.dlq`, acking only after the broker confirms the republish.
+
+| Script | What it does |
+| --- | --- |
+| `bun run backend:dev:worker` | Worker with watch mode |
+| `bun run backend:start:worker` | Runs the compiled worker (`apps/backend/worker`) |
 
 ## Database
 
@@ -108,7 +125,7 @@ Tests run against their own database, `matcha_test`, so development data is neve
 
 `bun test` sets `NODE_ENV=test`, and in that mode Bun does **not** read `.env.local`. Copy `apps/backend/.env.example` to `apps/backend/.env.test` (git-ignored), fill it in like `.env.local`, and make its `DATABASE_URL` point to `matcha_test`. The `test` script loads that file, and `pretest` applies the migrations to the test database before each run. The `pre-push` hook runs the tests, so it needs the infra too.
 
-In CI, the `backend` test job runs the tests against a throwaway Postgres service container.
+In CI, the `backend` test job runs the tests against throwaway Postgres, Redis, RabbitMQ and RustFS service containers (a step creates the bucket).
 
 ## Scripts
 
@@ -117,8 +134,9 @@ Run from the repo root.
 | Script | What it does |
 | --- | --- |
 | `bun run backend:dev` | Backend with watch mode and pretty logs |
-| `bun run build` | Compiles the backend into a standalone binary (`apps/backend/server`) |
-| `bun run start` | Runs the compiled binary (run `bun run build` first; JSON logs outside development) |
+| `bun run build` | Compiles the API and the worker into standalone binaries (`apps/backend/server` and `apps/backend/worker`) |
+| `bun run backend:start:server` | Runs the compiled API (run `bun run build` first; JSON logs outside development) |
+| `bun run backend:start:worker` | Runs the compiled worker |
 | `bun run lint` | Biome lint + format check |
 | `bun run format` | Biome lint + format, writing the safe fixes |
 | `bun run typecheck` | `tsc --noEmit` |
