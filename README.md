@@ -102,8 +102,6 @@ Drizzle is on the 1.0 release candidate (`1.0.0-rc.4`, pinned): there is no stab
 
 These scripts read `apps/backend/.env.local`. The infra must be up (`make all`).
 
-> The project subject asks for hand-written queries and defines a micro-framework as one without an ORM. Using Drizzle's query builder is a known risk for the defense.
-
 ### Tests with a real database
 
 Tests run against their own database, `matcha_test`, so development data is never touched. `docker/postgres/init.sql` creates it, but only when the Postgres volume is first created. On an existing volume, create it once with `docker compose exec postgres createdb -U <POSTGRES_USER> matcha_test` (or wipe everything with `make clean` and run `make all` again).
