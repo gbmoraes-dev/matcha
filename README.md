@@ -46,6 +46,8 @@ bun run backend:dev                               # starts the backend; GET http
 
 `make all` also runs the one-shot `rustfs-init` job, which creates the bucket (`BUCKET_NAME`) if it does not exist. It is safe to run again.
 
+The first time the Postgres volume is created, `docker/postgres/init.sql` also creates the `matcha_test` database used by the tests.
+
 | Command | What it does |
 | --- | --- |
 | `make help` | Lists the targets |
@@ -72,6 +74,8 @@ An empty value is not the same as an unset one: remove the lines you don't want 
 | `HOSTNAME` | any string | `0.0.0.0` |
 | `PORT` | 0 to 65535 | `3333` |
 | `DATABASE_URL` | Postgres URL | required |
+| `CONNECTION_TIMEOUT_MS` | milliseconds to wait for a database connection | `2000` |
+| `QUERY_TIMEOUT_MS` | milliseconds before a query or statement is cut | `5000` |
 | `CACHE_URL` | Redis URL | required |
 | `BROKER_URL` | AMQP URL | required |
 | `BUCKET_URL` | S3 endpoint URL (`http` or `https`) | required |
@@ -79,9 +83,32 @@ An empty value is not the same as an unset one: remove the lines you don't want 
 | `BUCKET_ACCESS_KEY` | RustFS access key | required |
 | `BUCKET_SECRET_KEY` | RustFS secret key | required |
 
-### Health check
+### Health checks
 
-`GET /healthz` returns `200` with `{ "status": "available", "uptime": <seconds> }`.
+- `GET /healthz` (liveness) returns `200` with `{ "status": "available", "uptime": <seconds> }`. It never touches a dependency, so it stays `200` while Postgres is down.
+- `GET /readyz` (readiness) checks the dependencies (today, the database with a `SELECT 1`) and returns `200` with `{ "application": "available", "database": "available" }`, or `503` with the failing one marked `unavailable`. Each ticket that adds a dependency adds its own check in `src/http/routes/public/readiness.ts`.
+
+## Database
+
+The backend talks to Postgres through [Drizzle](https://orm.drizzle.team) and `pg` (node-postgres). The schema lives in `apps/backend/src/database/schema` and the generated migrations in `apps/backend/src/database/migrations` (commit them). The first migration, `enable_extensions`, creates no tables: it enables `cube` and `earthdistance` (distance and radius queries), `pg_trgm` (fuzzy tag search), `unaccent` (accent-insensitive search) and `citext` (case-insensitive username and email). PostGIS is not needed for the proximity requirements.
+
+Drizzle is on the 1.0 release candidate (`1.0.0-rc.4`, pinned): there is no stable 1.0 yet, and `latest` on npm is still 0.x. Two things differ from 0.x: `drizzle()` takes `relations` instead of `schema` (add them in `src/database` when the first tables arrive), and the migration folder uses the new layout (one folder per migration with `migration.sql` and `snapshot.json`).
+
+| Script | What it does |
+| --- | --- |
+| `bun run backend:db:generate` | Generates a migration from schema changes (add `--custom --name <name>` for a hand-written SQL migration) |
+| `bun run backend:db:migrate` | Applies the pending migrations (`drizzle-kit migrate`); safe to run again |
+| `bun run backend:db:studio` | Opens Drizzle Studio |
+
+These scripts read `apps/backend/.env.local`. The infra must be up (`make all`).
+
+### Tests with a real database
+
+Tests run against their own database, `matcha_test`, so development data is never touched. `docker/postgres/init.sql` creates it, but only when the Postgres volume is first created. On an existing volume, create it once with `docker compose exec postgres createdb -U <POSTGRES_USER> matcha_test` (or wipe everything with `make clean` and run `make all` again).
+
+`bun test` sets `NODE_ENV=test`, and in that mode Bun does **not** read `.env.local`. Copy `apps/backend/.env.example` to `apps/backend/.env.test` (git-ignored), fill it in like `.env.local`, and make its `DATABASE_URL` point to `matcha_test`. The `test` script loads that file, and `pretest` applies the migrations to the test database before each run. The `pre-push` hook runs the tests, so it needs the infra too.
+
+In CI, the `backend` test job runs the tests against a throwaway Postgres service container.
 
 ## Scripts
 
@@ -95,7 +122,7 @@ Run from the repo root.
 | `bun run lint` | Biome lint + format check |
 | `bun run format` | Biome lint + format, writing the safe fixes |
 | `bun run typecheck` | `tsc --noEmit` |
-| `bun run test` | `bun test` |
+| `bun run test` | `bun test` (needs the infra and `apps/backend/.env.test`) |
 
 ## Git hooks
 
@@ -110,8 +137,8 @@ Work happens on feature branches and goes into `development` through a pull requ
 
 CI runs only on `pull_request` targeting `development` or `main`. A new push to the PR cancels the previous run. There is one workflow per area, each with a final aggregate job that is the required check:
 
-- `backend.yml` (check `backend`): runs when `apps/backend/**` changes. lint (biome, typecheck, audit) and test, then build.
-- `root.yml` (check `root`): runs when root config changes (`package.json`, `bun.lock`, `biome.json`, `tsconfig.base.json`, `lefthook.yml`). Biome on the whole repo, plus typecheck, tests and build of every app. Also lints the workflows (`actionlint`, `zizmor`) when anything in `.github/` changes.
+- `backend.yml` (check `backend`): runs when `apps/backend/**` or a shared root file that affects it (`bun.lock`, `package.json`, `tsconfig.base.json`) changes. lint (biome, typecheck, audit) and test, then build.
+- `root.yml` (check `root`): runs Biome on the whole repo when `biome.json`, `package.json` or `tsconfig.base.json` change (the app workflows only lint their own folder), and lints the workflows (`actionlint`, `zizmor`) when anything in `.github/` changes. Typecheck, build and tests of the apps stay in each app's workflow, which also runs when a shared root file that affects it changes.
 
 Each workflow always runs and skips its jobs when nothing relevant changed, so the check stays green instead of pending.
 

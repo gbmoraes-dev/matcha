@@ -11,6 +11,8 @@ const schema = z.object({
   HOSTNAME: z.string().default('0.0.0.0'),
   PORT: z.coerce.number().min(0).max(65535).default(3333),
   DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
+  CONNECTION_TIMEOUT_MS: z.coerce.number().default(2000),
+  QUERY_TIMEOUT_MS: z.coerce.number().default(5000),
   CACHE_URL: z.url({ protocol: /^rediss?$/ }),
   BROKER_URL: z.url({ protocol: /^amqp?$/ }),
   BUCKET_URL: z.url({ protocol: /^https?$/ }),
