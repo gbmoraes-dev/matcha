@@ -7,6 +7,9 @@
   ],
   "scripts": {
     "backend:dev": "bun --filter @matcha/backend dev",
+    "backend:db:generate": "bun --filter @matcha/backend db:generate",
+    "backend:db:migrate": "bun --filter @matcha/backend db:migrate",
+    "backend:db:studio": "bun --filter @matcha/backend db:studio",
     "build": "bun --filter '*' build",
     "start": "bun --filter '*' start",
     "test": "bun --filter '*' test",
