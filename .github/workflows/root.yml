@@ -2,7 +2,7 @@ name: Root CI
 
 on:
   pull_request:
-    branches: [development, main]
+    branches: [main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}

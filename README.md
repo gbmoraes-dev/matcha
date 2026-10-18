@@ -131,11 +131,11 @@ Run from the repo root.
 
 ## Branches
 
-Work happens on feature branches and goes into `development` through a pull request. `main` receives changes from `development`. Both branches are targets of the CI.
+`main` is the only long-lived branch. Work happens on short-lived feature branches and goes into `main` through a pull request, merged with squash (the PR title becomes the commit message). The `backend` and `root` checks must pass, conversations must be resolved and the branch must be up to date with `main` before merging.
 
 ## CI
 
-CI runs only on `pull_request` targeting `development` or `main`. A new push to the PR cancels the previous run. There is one workflow per area, each with a final aggregate job that is the required check:
+CI runs only on `pull_request` targeting `main`. A new push to the PR cancels the previous run. There is one workflow per area, each with a final aggregate job that is the required check:
 
 - `backend.yml` (check `backend`): runs when `apps/backend/**` or a shared root file that affects it (`bun.lock`, `package.json`, `tsconfig.base.json`) changes. lint (biome, typecheck, audit) and test, then build.
 - `root.yml` (check `root`): runs Biome on the whole repo when `biome.json`, `package.json` or `tsconfig.base.json` change (the app workflows only lint their own folder), and lints the workflows (`actionlint`, `zizmor`) when anything in `.github/` changes. Typecheck, build and tests of the apps stay in each app's workflow, which also runs when a shared root file that affects it changes.
