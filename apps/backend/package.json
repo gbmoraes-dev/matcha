@@ -4,8 +4,12 @@
   "type": "module",
   "scripts": {
     "dev": "bun --watch src/http/server.ts",
-    "build": "bun build --compile --minify-whitespace --minify-syntax --target bun --outfile server src/http/server.ts",
-    "start": "./server",
+    "dev:worker": "bun --watch src/worker/subscriber.ts",
+    "build:api": "bun build --compile --minify-whitespace --minify-syntax --target bun --outfile server src/http/server.ts",
+    "build:worker": "bun build --compile --minify-whitespace --minify-syntax --target bun --outfile worker src/worker/subscriber.ts",
+    "build": "bun run build:api && bun run build:worker",
+    "start:server": "./server",
+    "start:worker": "./worker",
     "typecheck": "tsc --noEmit",
     "pretest": "bun --env-file=.env.test db:migrate",
     "test": "bun --env-file=.env.test test",
@@ -18,6 +22,7 @@
     "elysia": "1.4.30",
     "pg": "8.23.1",
     "pino": "10.4.0",
+    "rabbitmq-client": "5.1.0",
     "zod": "4.6.7"
   },
   "devDependencies": {
