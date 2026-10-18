@@ -89,6 +89,7 @@ jobs:
       ORIGIN: http://localhost:3333
       DATABASE_URL: postgres://localhost:5432/test
       CACHE_URL: redis://localhost:6379
+      BROKER_URL: amqp://localhost:5672
       BUCKET_URL: http://localhost:9000
       BUCKET_NAME: test
       BUCKET_ACCESS_KEY: test
