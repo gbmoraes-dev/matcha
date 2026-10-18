@@ -65,7 +65,7 @@ There are two env files, both ignored by git:
 - `.env` at the repo root, read by `compose.yml`. It has the user, password and database the containers are created with, the host ports, the RustFS keys and the bucket name.
 - `apps/backend/.env`, read by the backend. Its connection values must match the root `.env` (user, password, database, ports, bucket, access and secret keys).
 
-An empty value is not the same as an unset one: remove the lines you don't want to set. An invalid or missing required value makes the app fail at boot with the Zod error.
+A blank value counts as not set, so the default applies. An invalid or missing required value makes the app fail at boot with the Zod error.
 
 | Variable | Values | Default |
 | --- | --- | --- |
@@ -83,6 +83,8 @@ An empty value is not the same as an unset one: remove the lines you don't want 
 | `BUCKET_NAME` | any string | required |
 | `BUCKET_ACCESS_KEY` | RustFS access key | required |
 | `BUCKET_SECRET_KEY` | RustFS secret key | required |
+| `RESEND_API_KEY` | Resend API key | required |
+| `MAIL_FROM` | sender address (a verified domain in production; Resend only allows `onboarding@resend.dev` for tests) | required |
 
 ### Health checks
 
@@ -92,18 +94,33 @@ An empty value is not the same as an unset one: remove the lines you don't want 
 ## Cache, storage and broker
 
 - **Redis** (`src/cache/index.ts`) and **S3** (`src/storage/index.ts`) use Bun's native `RedisClient` and `S3Client`, with no wrapper: features import `redis` and `s3` and call them directly. The Redis client keeps reconnecting if Redis is down at boot or restarts. Pointing `BUCKET_URL` and the keys at another S3 provider is enough to switch from RustFS.
-- **RabbitMQ** (`src/broker/broker.ts`) uses [`rabbitmq-client`](https://github.com/cody-greene/node-rabbitmq-client), which reconnects on its own and sets consumers and publishers up again. Each queue gets a file in `src/broker/channels/` that declares the queue, `<queue>.retry` (a TTL that returns the message to the queue) and `<queue>.dlq`, and a dispatch function in `src/broker/messages/`. The API only publishes.
+- **RabbitMQ** (`src/broker/broker.ts`) uses [`rabbitmq-client`](https://github.com/cody-greene/node-rabbitmq-client), which reconnects on its own and sets consumers and publishers up again. Each queue gets a file in `src/broker/channels/` that declares the queue (with a dead-letter exchange) and `<queue>.dlq`, and a dispatch function in `src/broker/messages/`. The API only publishes.
 
 ## Worker
 
 `src/worker/subscriber.ts` is a separate process from the same codebase that runs the queue consumers (the first one arrives with the email queue). The API serves requests without it.
 
-Delivery is at-least-once: a message that was in flight when the worker stopped, for any reason, is delivered again, so consumers must be idempotent. When a message fails, the consumer counts the attempts in the `x-attempts` header and republishes it to `<queue>.retry` or, at the limit, to `<queue>.dlq`, acking only after the broker confirms the republish.
+Delivery is at-least-once: a message that was in flight when the worker stopped, for any reason, is delivered again, so consumers must be idempotent. When a consumer throws, the message is rejected without requeue and the dead-letter exchange of the queue moves it to `<queue>.dlq`.
 
 | Script | What it does |
 | --- | --- |
 | `bun run backend:dev:worker` | Worker with watch mode |
 | `bun run backend:start:worker` | Runs the compiled worker (`apps/backend/worker`) |
+
+## Email
+
+`dispatchEmailRequested({ to, subject, html })` (`src/broker/messages/email-requested.ts`) validates the email, gives it an id and puts it in the `<NAME>.emails` queue, resolving once the broker confirms it; the worker delivers it. The request never waits for the provider, and if the queue is unreachable the promise rejects.
+
+- **Delivery:** the consumer in `src/worker/subscriber.ts` delivers each email. In production it sends through the Resend SDK; in development and test it prints the recipient, subject, body and the links of each email in the worker log, so no real email goes out by accident. It delivers 2 emails at a time, because Resend limits the requests per second.
+- **Failures:** if the delivery fails (or the message is not a valid email), the consumer throws and the message is rejected without requeue. The dead-letter exchange of the queue moves it to `<NAME>.emails.dlq`, and the failure is logged. There is no automatic retry: a message in the dead queue is looked at and sent again by hand.
+- **Idempotency:** the id is created once and sent to Resend as the idempotency key (Resend remembers it for 24 hours). An email redelivered after a crash is sent once.
+- **Templates:** emails are written with [React Email](https://react.email). `src/mailer/templates/layout.tsx` is the base layout; a feature writes its own component inside it, turns it into HTML with `render` from `@react-email/components` and passes the HTML to `dispatchEmailRequested`. Text in the JSX is escaped by React.
+
+### Previewing the templates
+
+`bun run backend:email` starts the React Email preview at http://localhost:3030. It lists every template in `src/mailer/templates` (a file with a default-exported component) and reloads it when you save. A template can export `PreviewProps`, the data it shows in the preview; `verify-account.tsx` is the example. Files with only named exports, like `layout.tsx`, are not listed.
+
+The queue names start with `NAME`, so the tests (another `NAME` in `.env.test`) never touch the development queues.
 
 ## Database
 
@@ -134,6 +151,8 @@ Run from the repo root.
 | Script | What it does |
 | --- | --- |
 | `bun run backend:dev` | Backend with watch mode and pretty logs |
+| `bun run backend:dev:worker` | Worker (queue consumers) with watch mode |
+| `bun run backend:email` | React Email preview of the templates in `src/mailer/templates` (http://localhost:3030) |
 | `bun run build` | Compiles the API and the worker into standalone binaries (`apps/backend/server` and `apps/backend/worker`) |
 | `bun run backend:start:server` | Runs the compiled API (run `bun run build` first; JSON logs outside development) |
 | `bun run backend:start:worker` | Runs the compiled worker |
