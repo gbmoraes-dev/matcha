@@ -19,6 +19,8 @@ const schema = z.object({
   BUCKET_NAME: z.string().min(1),
   BUCKET_ACCESS_KEY: z.string().min(1),
   BUCKET_SECRET_KEY: z.string().min(1),
+  RESEND_API_KEY: z.string().min(1),
+  MAIL_FROM: z.string().min(1),
 })
 
 export const env = schema.parse(process.env)

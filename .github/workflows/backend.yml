@@ -139,6 +139,7 @@ jobs:
           --health-retries 12
           --health-start-period 10s
     env:
+      NAME: ci
       ENVIRONMENT: test
       LOG_LEVEL: silent
       ORIGIN: http://localhost:3333

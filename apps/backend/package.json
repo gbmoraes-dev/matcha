@@ -3,13 +3,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun --watch src/http/server.ts",
+    "dev:api": "bun --watch src/http/server.ts",
     "dev:worker": "bun --watch src/worker/subscriber.ts",
     "build:api": "bun build --compile --minify-whitespace --minify-syntax --target bun --outfile server src/http/server.ts",
     "build:worker": "bun build --compile --minify-whitespace --minify-syntax --target bun --outfile worker src/worker/subscriber.ts",
     "build": "bun run build:api && bun run build:worker",
     "start:server": "./server",
     "start:worker": "./worker",
+    "email": "email dev --dir src/mailer/templates --port 3030",
     "typecheck": "tsc --noEmit",
     "pretest": "bun --env-file=.env.test db:migrate",
     "test": "bun --env-file=.env.test test",
@@ -18,18 +19,25 @@
     "db:studio": "bun --bun --env-file=.env.local drizzle-kit studio"
   },
   "dependencies": {
+    "@react-email/components": "1.0.12",
     "drizzle-orm": "1.0.0-rc.4",
     "elysia": "1.4.30",
     "pg": "8.23.1",
     "pino": "10.4.0",
     "rabbitmq-client": "5.1.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "resend": "6.34.1",
     "zod": "4.6.7"
   },
   "devDependencies": {
     "@elysia/eden": "1.4.10",
+    "@react-email/ui": "6.11.3",
     "@types/bun": "1.4.3",
     "@types/pg": "8.23.1",
+    "@types/react": "19.3.0",
     "drizzle-kit": "1.0.0-rc.4",
-    "pino-pretty": "13.2.0"
+    "pino-pretty": "13.2.0",
+    "react-email": "6.11.3"
   }
 }
