@@ -14,7 +14,7 @@ const schema = z.object({
   CONNECTION_TIMEOUT_MS: z.coerce.number().default(2000),
   QUERY_TIMEOUT_MS: z.coerce.number().default(5000),
   CACHE_URL: z.url({ protocol: /^rediss?$/ }),
-  BROKER_URL: z.url({ protocol: /^amqp?$/ }),
+  BROKER_URL: z.url({ protocol: /^amqps?$/ }),
   BUCKET_URL: z.url({ protocol: /^https?$/ }),
   BUCKET_NAME: z.string().min(1),
   BUCKET_ACCESS_KEY: z.string().min(1),
