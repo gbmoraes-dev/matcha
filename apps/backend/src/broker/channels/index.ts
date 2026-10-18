@@ -1,1 +1,5 @@
-export const channels = {}
+import { emails } from './emails'
+
+export const channels = {
+  emails,
+}
