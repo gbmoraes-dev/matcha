@@ -100,17 +100,55 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      rabbitmq:
+        image: rabbitmq:4-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: ci
+          RABBITMQ_DEFAULT_PASS: ci
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s
+          --health-timeout 10s
+          --health-retries 12
+          --health-start-period 15s
+
+      rustfs:
+        image: rustfs/rustfs:1.0.3
+        env:
+          RUSTFS_ACCESS_KEY: ci-access-key
+          RUSTFS_SECRET_KEY: ci-secret-key
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "curl --fail http://localhost:9000/health"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+          --health-start-period 10s
     env:
       ENVIRONMENT: test
       LOG_LEVEL: silent
       ORIGIN: http://localhost:3333
       DATABASE_URL: postgres://postgres@localhost:5432/postgres
       CACHE_URL: redis://localhost:6379
-      BROKER_URL: amqp://localhost:5672
+      BROKER_URL: amqp://ci:ci@localhost:5672
       BUCKET_URL: http://localhost:9000
       BUCKET_NAME: test
-      BUCKET_ACCESS_KEY: test
-      BUCKET_SECRET_KEY: test
+      BUCKET_ACCESS_KEY: ci-access-key
+      BUCKET_SECRET_KEY: ci-secret-key
       RESEND_API_KEY: test
       MAIL_FROM: test@example.com
 
@@ -130,6 +168,13 @@ jobs:
           restore-keys: bun-${{ runner.os }}-
 
       - run: bun install --frozen-lockfile
+
+      - name: Create the bucket
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.BUCKET_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.BUCKET_SECRET_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: aws --endpoint-url "$BUCKET_URL" s3api create-bucket --bucket "$BUCKET_NAME"
 
       - run: bun db:migrate
 
