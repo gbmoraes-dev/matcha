@@ -14,8 +14,7 @@
 
 # production
 /build
-/server
-/worker
+/matcha
 
 # misc
 .DS_Store
