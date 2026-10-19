@@ -153,6 +153,8 @@ jobs:
       BUCKET_SECRET_KEY: ci-secret-key
       RESEND_API_KEY: test
       MAIL_FROM: test@example.com
+      PASSWORD_MEMORY_COST: 1024
+      PASSWORD_TIME_COST: 1
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

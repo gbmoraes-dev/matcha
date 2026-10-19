@@ -23,6 +23,8 @@ const schema = z.object({
   BUCKET_SECRET_KEY: z.string().min(1),
   RESEND_API_KEY: z.string().min(1),
   MAIL_FROM: z.string().min(1),
+  PASSWORD_MEMORY_COST: z.coerce.number().positive().default(65536),
+  PASSWORD_TIME_COST: z.coerce.number().positive().default(2),
 })
 
 export const env = schema.parse(process.env)

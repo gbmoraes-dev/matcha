@@ -71,7 +71,7 @@ There are three env files, all ignored by git (plus `.env.test`, see the tests s
 - `apps/backend/.env.local`, read by the backend when it runs on the host (`bun run backend:dev:api`). Its connection values must match the root `.env` (user, password, database, ports, bucket, access and secret keys) and point to `localhost`.
 - `apps/backend/.env`, read by the containers (`make app` and `make dev`). It has the same variables, but the hosts are the compose service names (`postgres`, `redis`, `rabbitmq`, `rustfs`), the container ports (`5432`, `6379`, `5672`, `9000`) and `ENVIRONMENT=production`, which the compiled binary requires (the `make dev` override sets `development` for its own containers).
 
-A variable with a default can be left out. A blank value is not the same as an absent one (a blank `LOG_LEVEL` or `TRUST_PROXY` fails and a blank `PORT` becomes `0`), so remove the line instead of leaving it empty. An invalid or missing required value makes the app fail at boot with the Zod error.
+A variable with a default can be left out. A blank value is not the same as an absent one (a blank `LOG_LEVEL`, `TRUST_PROXY` or password cost fails and a blank `PORT` becomes `0`), so remove the line instead of leaving it empty. An invalid or missing required value makes the app fail at boot with the Zod error.
 
 | Variable | Values | Default |
 | --- | --- | --- |
@@ -92,7 +92,9 @@ A variable with a default can be left out. A blank value is not the same as an a
 | `BUCKET_ACCESS_KEY` | RustFS access key | required |
 | `BUCKET_SECRET_KEY` | RustFS secret key | required |
 | `RESEND_API_KEY` | Resend API key | required |
-| `MAIL_FROM` | sender address (a verified domain in production; Resend only allows `onboarding@resend.dev` for tests) | required |
+| `MAIL_FROM` | sender address (a verified domain in production; Resend only allows `onboarding@resend.dev` for tests, and then only to the email of the Resend account) | required |
+| `PASSWORD_MEMORY_COST` | argon2id memory cost in KiB, a positive integer (`1024` in `.env.test` and CI, so tests do not spend their time hashing) | `65536` |
+| `PASSWORD_TIME_COST` | argon2id iterations, a positive integer (`1` in `.env.test` and CI) | `2` |
 
 ### Health checks
 
@@ -158,11 +160,30 @@ Delivery is at-least-once: a message that was in flight when the worker stopped,
 
 The queue names start with `NAME`, so the tests (another `NAME` in `.env.test`) never touch the development queues.
 
+## Accounts
+
+Sign-up and email verification are public routes in `src/http/routes/public/auth/` (tag `Auth` in `/docs`).
+
+| Route | What it does |
+| --- | --- |
+| `POST /auth/sign-up` | Creates an unverified user and sends the verification email. `201`; `409` (`EMAIL_TAKEN`, `USERNAME_TAKEN`); `422` for an invalid body, `PASSWORD_COMMON` or `PASSWORD_PWNED` |
+| `POST /auth/verify` | Takes `{ token }`, marks the user as verified and consumes the token. `204`; `400 INVALID_TOKEN` when the token is unknown, expired or already used |
+| `POST /auth/verification/send` | Takes `{ email }` and sends a new link, which replaces the previous ones. Always `202` with an empty body, so it does not reveal which emails exist; it only sends for an existing unverified user |
+
+Rate limits, per IP and per 15 minutes: 5 sign-ups, 10 verifications and 3 resends.
+
+- **Fields:** email, username (3 to 20 letters, numbers or underscores), first and last name (up to 50 characters) and password (8 to 128 characters). Email and username are trimmed and lowercased.
+- **Password:** hashed with argon2id (`Bun.password.hash`, cost from `PASSWORD_MEMORY_COST` and `PASSWORD_TIME_COST`). It is rejected when it is in the local list of common passwords (`src/lib/common-passwords/passwords.txt`, about 2,000 entries of 8 characters or more taken from the 10k most common list of [SecLists](https://github.com/danielmiessler/SecLists), MIT license) or when it appears in [Have I Been Pwned](https://haveibeenpwned.com/API/v3#PwnedPasswords) (`src/lib/hibp/check-pwned-password.ts`; only the first five characters of the SHA-1 leave the server). The local list is checked first and works offline. The Have I Been Pwned check fails open: on a timeout or an error it logs a warning and lets the sign-up go on.
+- **Verification token:** 32 random bytes (base64url), valid for 24 hours. Only its SHA-256 is stored, in `email_verification_tokens`. The email links to `ORIGIN/verify?token=...`, a page of the frontend that POSTs the token to `/auth/verify`, so a link scanner opening the URL does not consume it. `/auth/verify` consumes the token with one conditional `UPDATE`, so two simultaneous requests cannot both succeed.
+- **Delivery:** `sendVerificationEmail` (`src/utils/send-verification-email.ts`) stores the token, renders `verify-account.tsx` and calls `dispatchEmailRequested`; sign-up and resend share it.
+
 ## Database
 
-The backend talks to Postgres through [Drizzle](https://orm.drizzle.team) and `pg` (node-postgres). The schema lives in `apps/backend/src/database/schema` and the generated migrations in `apps/backend/src/database/migrations` (commit them). The first migration, `enable_extensions`, creates no tables: it enables `cube` and `earthdistance` (distance and radius queries), `pg_trgm` (fuzzy tag search), `unaccent` (accent-insensitive search) and `citext` (case-insensitive username and email). PostGIS is not needed for the proximity requirements.
+The backend talks to Postgres through [Drizzle](https://orm.drizzle.team) and `pg` (node-postgres). The schema lives in `apps/backend/src/database/schema` and the generated migrations in `apps/backend/src/database/migrations` (commit them). The first migration, `enable_extensions`, creates no tables: it enables `cube` and `earthdistance` (distance and radius queries), `pg_trgm` (fuzzy tag search), `unaccent` (accent-insensitive search) and `citext`. PostGIS is not needed for the proximity requirements.
 
-Drizzle is on the 1.0 release candidate (`1.0.0-rc.4`, pinned): there is no stable 1.0 yet, and `latest` on npm is still 0.x. Two things differ from 0.x: `drizzle()` takes `relations` instead of `schema` (add them in `src/database` when the first tables arrive), and the migration folder uses the new layout (one folder per migration with `migration.sql` and `snapshot.json`).
+The second migration creates `users` and `email_verification_tokens`. `users.email` and `users.username` are plain `text` with a unique constraint: the API trims and lowercases both before saving, so the constraints already treat `Ana` and `ana` as the same value and no `lower()` is needed in queries.
+
+Drizzle is on the 1.0 release candidate (`1.0.0-rc.4`, pinned): there is no stable 1.0 yet, and `latest` on npm is still 0.x. Two things differ from 0.x: `drizzle()` takes `relations` instead of `schema` (declared with `defineRelations` in `src/database/schema/relations.ts`, from the `schema` object exported by `schema/index.ts`, and passed in `src/database/index.ts`), and the migration folder uses the new layout (one folder per migration with `migration.sql` and `snapshot.json`). Tables are exported one per file; `drizzle.config.ts` reads every file in `src/database/schema`.
 
 | Script | What it does |
 | --- | --- |
@@ -177,6 +198,8 @@ These scripts read `apps/backend/.env.local`. The infra must be up (`make all`).
 Tests run against their own database, `matcha_test`, so development data is never touched. `docker/postgres/init.sql` creates it, but only when the Postgres volume is first created. On an existing volume, create it once with `docker compose exec postgres createdb -U <POSTGRES_USER> matcha_test` (or wipe everything with `make clean` and run `make all` again).
 
 `bun test` sets `NODE_ENV=test`, and in that mode Bun does **not** read `.env.local`. Copy `apps/backend/.env.example` to `apps/backend/.env.test` (git-ignored), fill it in like `.env.local`, and make its `DATABASE_URL` point to `matcha_test`. The `test` script loads that file, and `pretest` applies the migrations to the test database before each run. The `pre-push` hook runs the tests, so it needs the infra too.
+
+Route tests are `*.spec.ts` files next to each route. They call the real app through `api` (`src/http/app.ts`), with the database and Redis for real and only the email queue and Have I Been Pwned replaced. The shared helpers (clearing users and rate limit counters, spying on emails) live in `apps/backend/test/` and are imported as `@test/*`. Set `PASSWORD_MEMORY_COST=1024` and `PASSWORD_TIME_COST=1` in `.env.test`, or each sign-up spends about 50 ms hashing the password.
 
 In CI, the `backend` test job runs the tests against throwaway Postgres, Redis, RabbitMQ and RustFS service containers (a step creates the bucket).
 

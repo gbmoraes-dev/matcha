@@ -8,13 +8,7 @@ import {
 } from '@react-email/components'
 import { Layout } from './layout'
 
-export default function VerifyAccount({
-  name,
-  url,
-}: {
-  name: string
-  url: string
-}) {
+export function VerifyAccount({ name, url }: { name: string; url: string }) {
   return (
     <Layout
       title="Verify your account"
@@ -62,3 +56,5 @@ VerifyAccount.PreviewProps = {
   name: 'Ana',
   url: 'https://matcha.test/verify?token=abc123',
 }
+
+export default VerifyAccount
