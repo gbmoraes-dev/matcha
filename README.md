@@ -29,7 +29,7 @@ lefthook.yml         # git hooks
 bun install                                       # installs dependencies and the git hooks (Lefthook)
 cp .env.example .env                              # fill in the infra values
 cp apps/backend/.env.example apps/backend/.env.local   # fill in the backend values (running on the host)
-make all                                          # starts the infra and waits until it is healthy
+make all                                          # starts the infra, waits until it is healthy and applies the migrations
 bun run backend:dev:api                           # starts the backend; GET http://localhost:3333/healthz
 bun run backend:dev:worker                        # starts the worker (queue consumers), in another terminal
 ```
@@ -55,8 +55,8 @@ The first time the Postgres volume is created, `docker/postgres/init.sql` also c
 | Command | What it does |
 | --- | --- |
 | `make help` | Lists the targets |
-| `make all` | Starts the infra, waits until every service is healthy and creates the bucket |
-| `make app` | `make all`, then runs the migrations and starts the API and the worker from the production images |
+| `make all` | Starts the infra, waits until every service is healthy, creates the bucket and applies the migrations to the development database and, when `apps/backend/.env.test` exists, to `matcha_test` (it needs Bun and `apps/backend/.env.local` on the host) |
+| `make app` | Starts the infra, then runs the migrations (the `migrate` service) and starts the API and the worker from the production images; it only needs Docker |
 | `make dev` | Like `make app`, with the source mounted and a restart on every change |
 | `make down` | Stops the infra and the app, keeping the data |
 | `make clean` | Stops the infra and wipes all volumes (clean state) |
@@ -197,7 +197,7 @@ These scripts read `apps/backend/.env.local`. The infra must be up (`make all`).
 
 Tests run against their own database, `matcha_test`, so development data is never touched. `docker/postgres/init.sql` creates it, but only when the Postgres volume is first created. On an existing volume, create it once with `docker compose exec postgres createdb -U <POSTGRES_USER> matcha_test` (or wipe everything with `make clean` and run `make all` again).
 
-`bun test` sets `NODE_ENV=test`, and in that mode Bun does **not** read `.env.local`. Copy `apps/backend/.env.example` to `apps/backend/.env.test` (git-ignored), fill it in like `.env.local`, and make its `DATABASE_URL` point to `matcha_test`. The `test` script loads that file, and `pretest` applies the migrations to the test database before each run. The `pre-push` hook runs the tests, so it needs the infra too.
+`bun test` sets `NODE_ENV=test`, and in that mode Bun does **not** read `.env.local`. Copy `apps/backend/.env.example` to `apps/backend/.env.test` (git-ignored), fill it in like `.env.local`, and make its `DATABASE_URL` point to `matcha_test`. The `test` script loads that file, and `pretest` applies the migrations to the test database before each run. `make all` applies them too, so a fresh volume is ready for `bun test` as well (running `bun test` directly skips `pretest`). The `pre-push` hook runs the tests, so it needs the infra too.
 
 Route tests are `*.spec.ts` files next to each route. They call the real app through `api` (`src/http/app.ts`), with the database and Redis for real and only the email queue and Have I Been Pwned replaced. The shared helpers (clearing users and rate limit counters, spying on emails) live in `apps/backend/test/` and are imported as `@test/*`. Set `PASSWORD_MEMORY_COST=1024` and `PASSWORD_TIME_COST=1` in `.env.test`, or each sign-up spends about 50 ms hashing the password.
 
