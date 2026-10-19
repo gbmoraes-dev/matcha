@@ -19,9 +19,12 @@
     "db:studio": "bun --bun --env-file=.env.local drizzle-kit studio"
   },
   "dependencies": {
+    "@elysiajs/cors": "1.4.2",
+    "@elysiajs/openapi": "1.4.16",
     "@react-email/components": "1.0.12",
     "drizzle-orm": "1.0.0-rc.4",
     "elysia": "1.4.30",
+    "elysia-rate-limit": "4.6.3",
     "pg": "8.23.1",
     "pino": "10.4.0",
     "rabbitmq-client": "5.1.0",
