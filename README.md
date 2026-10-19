@@ -10,10 +10,12 @@ Bun monorepo. The backend lives in `apps/backend` (Bun, Elysia, Zod).
 ## Project structure
 
 ```
-apps/backend/        # Elysia API (src/http, src/utils, src/env.ts)
+apps/backend/        # API, worker and migrator (src/http, src/worker, src/database, src/main.ts) and its Dockerfile
+docker/              # Postgres init script (creates the test database)
 docs/                # project subject and documents
 .github/             # CI workflows and Dependabot
-compose.yml          # local infra: Postgres, Redis, RabbitMQ, RustFS
+compose.yml          # local infra: Postgres, Redis, RabbitMQ, RustFS (and the app, profile `app`)
+compose.dev.yml      # override: the app restarting on every change
 Makefile             # infra entrypoint (make help)
 .env.example         # variables read by compose.yml
 biome.json           # lint + format config (whole repo)
@@ -26,7 +28,7 @@ lefthook.yml         # git hooks
 ```sh
 bun install                                       # installs dependencies and the git hooks (Lefthook)
 cp .env.example .env                              # fill in the infra values
-cp apps/backend/.env.example apps/backend/.env    # fill in the backend values
+cp apps/backend/.env.example apps/backend/.env.local   # fill in the backend values (running on the host)
 make all                                          # starts the infra and waits until it is healthy
 bun run backend:dev:api                           # starts the backend; GET http://localhost:3333/healthz
 bun run backend:dev:worker                        # starts the worker (queue consumers), in another terminal
@@ -44,6 +46,7 @@ bun run backend:dev:worker                        # starts the worker (queue con
 | RabbitMQ management UI | 15672 | `RABBITMQ_MANAGEMENT_PORT` | `http://localhost:<port>` |
 | RustFS (S3 API) | 9000 | `RUSTFS_PORT` | `http://localhost:<port>` |
 | RustFS console | 9001 | `RUSTFS_CONSOLE_PORT` | `http://localhost:<port>` |
+| Backend (only with `make app` or `make dev`) | 3333 | `BACKEND_PORT` | `http://localhost:<port>` |
 
 `make all` also runs the one-shot `rustfs-init` job, which creates the bucket (`BUCKET_NAME`) if it does not exist. It is safe to run again.
 
@@ -53,19 +56,22 @@ The first time the Postgres volume is created, `docker/postgres/init.sql` also c
 | --- | --- |
 | `make help` | Lists the targets |
 | `make all` | Starts the infra, waits until every service is healthy and creates the bucket |
-| `make down` | Stops the infra, keeping the data |
+| `make app` | `make all`, then runs the migrations and starts the API and the worker from the production images |
+| `make dev` | Like `make app`, with the source mounted and a restart on every change |
+| `make down` | Stops the infra and the app, keeping the data |
 | `make clean` | Stops the infra and wipes all volumes (clean state) |
 | `make logs` | Follows the logs |
 | `make ps` | Shows the services and their health |
 
 ### Environment variables
 
-There are two env files, both ignored by git:
+There are three env files, all ignored by git (plus `.env.test`, see the tests section):
 
-- `.env` at the repo root, read by `compose.yml`. It has the user, password and database the containers are created with, the host ports, the RustFS keys and the bucket name.
-- `apps/backend/.env`, read by the backend. Its connection values must match the root `.env` (user, password, database, ports, bucket, access and secret keys).
+- `.env` at the repo root, read by `compose.yml`. It has the user, password and database the containers are created with, the host ports (including `BACKEND_PORT`), the RustFS keys and the bucket name.
+- `apps/backend/.env.local`, read by the backend when it runs on the host (`bun run backend:dev:api`). Its connection values must match the root `.env` (user, password, database, ports, bucket, access and secret keys) and point to `localhost`.
+- `apps/backend/.env`, read by the containers (`make app` and `make dev`). It has the same variables, but the hosts are the compose service names (`postgres`, `redis`, `rabbitmq`, `rustfs`), the container ports (`5432`, `6379`, `5672`, `9000`) and `ENVIRONMENT=production`, which the compiled binary requires (the `make dev` override sets `development` for its own containers).
 
-A blank value counts as not set, so the default applies. An invalid or missing required value makes the app fail at boot with the Zod error.
+A variable with a default can be left out. A blank value is not the same as an absent one (a blank `LOG_LEVEL` or `TRUST_PROXY` fails and a blank `PORT` becomes `0`), so remove the line instead of leaving it empty. An invalid or missing required value makes the app fail at boot with the Zod error.
 
 | Variable | Values | Default |
 | --- | --- | --- |
@@ -93,6 +99,23 @@ A blank value counts as not set, so the default applies. An invalid or missing r
 - `GET /healthz` (liveness) returns `200` with `{ "status": "available", "uptime": <seconds> }`. It never touches a dependency, so it stays `200` while Postgres is down.
 - `GET /readyz` (readiness) checks the database (`SELECT 1`), the cache (`redis.ping()`), the bucket (`s3.list`, which also validates the credentials) and the broker connection. It returns `200` with `{ "application", "database", "cache", "bucket", "broker" }`, all `available`, or `503` with the failing ones marked `unavailable`. Each check is cut after `CONNECTION_TIMEOUT_MS`. A new dependency adds its own check in `src/http/routes/public/readiness.ts`.
 
+## Docker
+
+`apps/backend/Dockerfile` builds from the repo root (`docker build -f apps/backend/Dockerfile .`) and has these targets:
+
+| Target | What it is |
+| --- | --- |
+| `runtime` | The production image (the default target): the compiled binary on Alpine, as a non-root user, with `ENVIRONMENT=production`, port `3333` and the SQL in `src/database/migrations` |
+| `dev-api`, `dev-worker` | Bun with the dependencies; the source is mounted by `compose.dev.yml` and the process restarts on every change (`bun --watch`) |
+
+There is one image and one binary, `matcha` (`src/main.ts`). Its first argument says what it runs: `./matcha api` (the default `CMD`), `./matcha worker` or `./matcha migrate`; anything else fails. The three processes use the same image and only differ in the command (`command` in compose, `args` in Kubernetes). It carries no Bun and no `node_modules`: `bun build --compile` puts the runtime inside the binary, and it only runs with `ENVIRONMENT=production`, because with `development` the `pino-pretty` transport cannot be resolved inside the binary. The image has about 86 MB on disk and 41 MB compressed.
+
+Migrations are not part of the entrypoint. `./matcha migrate` runs them as their own step, before the API and the worker start (`make app` does it through the `migrate` service). That keeps the worker and several API replicas from migrating at the same time. It runs the `drizzle-orm` migrator, which uses the same `drizzle.__drizzle_migrations` table as `drizzle-kit`, so no `drizzle-kit` and no dependencies are needed in the image. On the host, `bun run backend:db:migrate` still runs `drizzle-kit`, and both can be used on the same database.
+
+`make app` and `make dev` run the `app` profile of `compose.yml`: `migrate`, `backend` (healthcheck on `/healthz`, port `BACKEND_PORT` of the root `.env`) and `worker`, reading `apps/backend/.env`. `make app` runs the real image, so the worker delivers email through Resend with the key in that file.
+
+On every pull request that touches the backend, the `image` job of `backend.yml` builds the image without pushing it, with the GitHub Actions layer cache. The image is not published to a registry yet, because there is no deploy.
+
 ## Cache, storage and broker
 
 - **Redis** (`src/cache/index.ts`) and **S3** (`src/storage/index.ts`) use Bun's native `RedisClient` and `S3Client`, with no wrapper: features import `redis` and `s3` and call them directly. The Redis client keeps reconnecting if Redis is down at boot or restarts. Pointing `BUCKET_URL` and the keys at another S3 provider is enough to switch from RustFS.
@@ -111,14 +134,14 @@ Every route follows the same rules, set up as plugins in `src/http/plugins/` and
 
 ## Worker
 
-`src/worker/subscriber.ts` is a separate process from the same codebase that runs the queue consumers (the first one arrives with the email queue). The API serves requests without it.
+`src/worker/subscriber.ts` is a separate process from the same codebase that runs the queue consumers (today, the email queue). The API serves requests without it.
 
 Delivery is at-least-once: a message that was in flight when the worker stopped, for any reason, is delivered again, so consumers must be idempotent. When a consumer throws, the message is rejected without requeue and the dead-letter exchange of the queue moves it to `<queue>.dlq`.
 
 | Script | What it does |
 | --- | --- |
 | `bun run backend:dev:worker` | Worker with watch mode |
-| `bun run backend:start:worker` | Runs the compiled worker (`apps/backend/worker`) |
+| `bun run backend:start:worker` | Runs the compiled worker (`./matcha worker`) |
 
 ## Email
 
@@ -166,8 +189,8 @@ Run from the repo root.
 | `bun run backend:dev:api` | Backend with watch mode and pretty logs |
 | `bun run backend:dev:worker` | Worker (queue consumers) with watch mode |
 | `bun run backend:email` | React Email preview of the templates in `src/mailer/templates` (http://localhost:3030) |
-| `bun run build` | Compiles the API and the worker into standalone binaries (`apps/backend/server` and `apps/backend/worker`) |
-| `bun run backend:start:server` | Runs the compiled API (run `bun run build` first; JSON logs outside development) |
+| `bun run build` | Compiles the API, the worker and the migrator into one standalone binary (`apps/backend/matcha`) |
+| `bun run backend:start:server` | Runs the compiled API (`./matcha api`; run `bun run build` first, with `ENVIRONMENT=production`) |
 | `bun run backend:start:worker` | Runs the compiled worker |
 | `bun run lint` | Biome lint + format check |
 | `bun run format` | Biome lint + format, writing the safe fixes |
@@ -187,7 +210,7 @@ Run from the repo root.
 
 CI runs only on `pull_request` targeting `main`. A new push to the PR cancels the previous run. There is one workflow per area, each with a final aggregate job that is the required check:
 
-- `backend.yml` (check `backend`): runs when `apps/backend/**` or a shared root file that affects it (`bun.lock`, `package.json`, `tsconfig.base.json`) changes. lint (biome, typecheck, audit) and test, then build.
+- `backend.yml` (check `backend`): runs when `apps/backend/**`, `.dockerignore` or a shared root file that affects it (`bun.lock`, `package.json`, `tsconfig.base.json`) changes. lint (biome, typecheck, audit) and test, then build; the `image` job builds the Docker image without pushing it.
 - `root.yml` (check `root`): runs Biome on the whole repo when `biome.json`, `package.json` or `tsconfig.base.json` change (the app workflows only lint their own folder), and lints the workflows (`actionlint`, `zizmor`) when anything in `.github/` changes. Typecheck, build and tests of the apps stay in each app's workflow, which also runs when a shared root file that affects it changes.
 
 Each workflow always runs and skips its jobs when nothing relevant changed, so the check stays green instead of pending.
