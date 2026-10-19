@@ -210,7 +210,7 @@ Run from the repo root.
 
 CI runs only on `pull_request` targeting `main`. A new push to the PR cancels the previous run. There is one workflow per area, each with a final aggregate job that is the required check:
 
-- `backend.yml` (check `backend`): runs when `apps/backend/**`, `.dockerignore` or a shared root file that affects it (`bun.lock`, `package.json`, `tsconfig.base.json`) changes. lint (biome, typecheck, audit) and test, then build; the `image` job builds the Docker image without pushing it.
+- `backend.yml` (check `backend`): runs when `apps/backend/**`, `.dockerignore` or a shared root file that affects it (`bun.lock`, `package.json`, `tsconfig.base.json`) changes. lint (biome, typecheck, audit), test, and the `image` job, which builds the Docker image (running `bun run build` inside it) without pushing it.
 - `root.yml` (check `root`): runs Biome on the whole repo when `biome.json`, `package.json` or `tsconfig.base.json` change (the app workflows only lint their own folder), and lints the workflows (`actionlint`, `zizmor`) when anything in `.github/` changes. Typecheck, build and tests of the apps stay in each app's workflow, which also runs when a shared root file that affects it changes.
 
 Each workflow always runs and skips its jobs when nothing relevant changed, so the check stays green instead of pending.

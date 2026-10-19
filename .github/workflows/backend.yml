@@ -182,37 +182,6 @@ jobs:
 
       - run: bun run test
 
-  build:
-    name: build
-    needs: [changes, lint, test]
-    if: needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    defaults:
-      run:
-        working-directory: apps/backend
-
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-          restore-keys: bun-${{ runner.os }}-
-
-      - run: bun install --frozen-lockfile
-
-      - run: bun run build
-
   image:
     name: image
     needs: changes
@@ -248,7 +217,7 @@ jobs:
   backend:
     name: backend
     if: always()
-    needs: [changes, lint, test, build, image]
+    needs: [changes, lint, test, image]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
