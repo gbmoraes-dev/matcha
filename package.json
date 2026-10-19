@@ -6,7 +6,7 @@
     "apps/*"
   ],
   "scripts": {
-    "backend:dev": "bun --filter @matcha/backend dev",
+    "backend:dev:api": "bun --filter @matcha/backend dev:api",
     "backend:dev:worker": "bun --filter @matcha/backend dev:worker",
     "backend:email": "bun --filter @matcha/backend email",
     "backend:start:server": "bun --filter @matcha/backend start:server",
