@@ -10,6 +10,8 @@ const schema = z.object({
     .default('info'),
   HOSTNAME: z.string().default('0.0.0.0'),
   PORT: z.coerce.number().min(0).max(65535).default(3333),
+  ORIGIN: z.url({ protocol: /^https?$/ }),
+  TRUST_PROXY: z.stringbool().default(false),
   DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
   CONNECTION_TIMEOUT_MS: z.coerce.number().default(2000),
   QUERY_TIMEOUT_MS: z.coerce.number().default(5000),
