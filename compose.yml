@@ -1,3 +1,7 @@
+x-backend: &backend
+  profiles: ["app"]
+  env_file: apps/backend/.env
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -87,6 +91,56 @@ services:
       - |
         aws --endpoint-url http://rustfs:9000 s3api head-bucket --bucket "$$BUCKET_NAME" 2>/dev/null \
           || aws --endpoint-url http://rustfs:9000 s3api create-bucket --bucket "$$BUCKET_NAME"
+
+  migrate:
+    <<: *backend
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+      target: runtime
+    command: ["./matcha", "migrate"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend:
+    <<: *backend
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+      target: runtime
+    command: ["./matcha", "api"]
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:${BACKEND_PORT}:3333
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  worker:
+    <<: *backend
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+      target: runtime
+    command: ["./matcha", "worker"]
+    restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
 
 volumes:
   postgres-data:

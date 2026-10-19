@@ -1,0 +1,18 @@
+x-backend-dev: &backend-dev
+  environment:
+    ENVIRONMENT: development
+  volumes:
+    - ./apps/backend/src:/app/apps/backend/src
+
+services:
+  backend:
+    <<: *backend-dev
+    build:
+      target: dev-api
+    command: ["bun", "--watch", "src/http/server.ts"]
+
+  worker:
+    <<: *backend-dev
+    build:
+      target: dev-worker
+    command: ["bun", "--watch", "src/worker/subscriber.ts"]
