@@ -18,28 +18,28 @@
     "db:studio": "bun --bun --env-file=.env.local drizzle-kit studio"
   },
   "dependencies": {
-    "@elysiajs/cors": "1.4.2",
-    "@elysiajs/openapi": "1.4.16",
+    "@elysiajs/cors": "1.4.3",
+    "@elysiajs/openapi": "1.4.17",
     "@react-email/components": "1.0.12",
     "drizzle-orm": "1.0.0-rc.4",
-    "elysia": "1.4.30",
+    "elysia": "1.4.31",
     "elysia-rate-limit": "4.6.3",
     "pg": "8.23.1",
     "pino": "10.4.0",
     "rabbitmq-client": "5.1.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "resend": "6.34.1",
+    "resend": "6.37.0",
     "zod": "4.6.7"
   },
   "devDependencies": {
     "@elysia/eden": "1.4.10",
-    "@react-email/ui": "6.11.3",
-    "@types/bun": "1.4.3",
+    "@react-email/ui": "6.11.8",
+    "@types/bun": "1.4.4",
     "@types/pg": "8.23.1",
     "@types/react": "19.3.0",
     "drizzle-kit": "1.0.0-rc.4",
     "pino-pretty": "13.2.0",
-    "react-email": "6.11.3"
+    "react-email": "6.11.8"
   }
 }
